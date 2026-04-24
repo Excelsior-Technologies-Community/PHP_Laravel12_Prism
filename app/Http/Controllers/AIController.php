@@ -5,7 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Prism\Prism\Prism;
 use Prism\Prism\Exceptions\PrismException;
-use App\Models\Chat; 
+use App\Models\Chat;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class AIController extends Controller
 {
@@ -16,43 +17,14 @@ class AIController extends Controller
         $this->prism = $prism;
     }
 
-    /**
-     * Simple text generation test
-     */
-    public function text()
+    // SHOW PAGE
+    public function index()
     {
-        try {
-            $response = $this->prism->text()
-                ->using('openrouter', 'openrouter/auto')
-                ->withPrompt('Give a short productivity tip.')
-                ->generate();
-
-            return $response->text ?? 'No response received.';
-        } catch (PrismException $e) {
-            return 'AI Error: ' . $e->getMessage();
-        }
+        $chats = Chat::latest()->get(); // remove limit for testing
+        return view('ai', compact('chats'));
     }
 
-    /**
-     * Example question
-     */
-    public function chat()
-    {
-        try {
-            $response = $this->prism->text()
-                ->using('openrouter', 'openrouter/auto')
-                ->withPrompt('What is MVC in Laravel?')
-                ->generate();
-
-            return $response->text ?? 'No response received.';
-        } catch (PrismException $e) {
-            return 'AI Error: ' . $e->getMessage();
-        }
-    }
-
-    /**
-     * Ask from Blade form
-     */
+    // ASK AI
     public function ask(Request $request)
     {
         $request->validate([
@@ -62,33 +34,60 @@ class AIController extends Controller
         try {
             $response = $this->prism->text()
                 ->using('openrouter', 'openrouter/auto')
-                ->withPrompt($request->question)
+                ->withPrompt("Answer in only 2-3 lines: " . $request->question)
                 ->generate();
+            $answerText = $response->text ?? 'No response';
 
-            $answerText = $response->text ?? 'No response received.';
-
-            // ✅ SAVE TO DATABASE
             Chat::create([
                 'question' => $request->question,
-                'answer'   => $answerText,
-            ]);
-
-            // ✅ LOAD HISTORY
-            $chats = Chat::latest()->take(10)->get();
-
-            return view('ai', [
                 'answer' => $answerText,
-                'chats'  => $chats, // ✅ ADDED
             ]);
 
         } catch (PrismException $e) {
-
-            $chats = Chat::latest()->take(10)->get(); // ✅ still show history
-
-            return view('ai', [
-                'answer' => 'AI service temporarily unavailable. Please try again later.',
-                'chats'  => $chats,
+            Chat::create([
+                'question' => $request->question,
+                'answer' => 'AI service error. Try again.',
             ]);
         }
+
+        return redirect()->back()->with('success', '✅ Chat added successfully!'); // ✅ IMPORTANT FIX
+    }
+
+    // SEARCH
+    public function search(Request $request)
+    {
+        $query = $request->input('query'); // ✅ FIXED
+
+        $chats = Chat::where('question', 'like', "%$query%")
+            ->latest()
+            ->get();
+
+        return view('ai', compact('chats'));
+    }
+
+    // DELETE SINGLE
+    public function delete($id)
+    {
+        Chat::findOrFail($id)->delete();
+
+        return redirect('/ai')->with('success', 'Chat deleted successfully!');
+    }
+
+    // CLEAR ALL
+    public function clearAll()
+    {
+        Chat::truncate();
+
+        return back()->with('success', '🔥 All chats cleared successfully!');
+    }
+
+    // EXPORT PDF
+    public function exportPdf()
+    {
+        $chats = Chat::latest()->get();
+
+        $pdf = Pdf::loadView('pdf.chat', compact('chats'));
+
+        return $pdf->download('chat-history.pdf');
     }
 }
