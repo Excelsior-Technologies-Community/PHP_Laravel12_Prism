@@ -9,5 +9,6 @@ class Chat extends Model
     protected $fillable = [
         'question',
         'answer',
+        'image'   // ✅ ADD THIS
     ];
 }
