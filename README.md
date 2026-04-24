@@ -504,5 +504,8 @@ PHP_Laravel12_Prism
 
 
 You have successfully built a **PHP_Laravel12_Prism** project.
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> development
