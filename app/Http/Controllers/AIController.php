@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Prism\Prism\Prism;
+use Prism\Prism\ValueObjects\Messages\UserMessage;
+use Prism\Prism\ValueObjects\Messages\AssistantMessage;
+use Prism\Prism\ValueObjects\Messages\SystemMessage;
 use App\Models\Chat;
 use Barryvdh\DomPDF\Facade\Pdf;
 use thiagoalessio\TesseractOCR\TesseractOCR;
@@ -17,14 +20,12 @@ class AIController extends Controller
         $this->prism = $prism;
     }
 
-    // SHOW PAGE
     public function index()
     {
         $chats = Chat::latest()->get();
         return view('ai', compact('chats'));
     }
 
-    // ASK AI (TEXT + IMAGE FIXED)
     public function ask(Request $request)
     {
         $request->validate([
@@ -34,36 +35,41 @@ class AIController extends Controller
 
         $imagePath = null;
         $answerText = '';
+        $finalText = $request->question ?? '';
 
         try {
-
-            $finalText = $request->question ?? '';
-
-            // ✅ IF IMAGE UPLOADED → USE OCR
             if ($request->hasFile('image')) {
-
                 $imagePath = $request->file('image')->store('chat-images', 'public');
-
                 $fullPath = storage_path('app/public/' . $imagePath);
-
-                // OCR (READ IMAGE TEXT)
-                $ocrText = (new TesseractOCR($fullPath))->run();
-
+                $ocrText = (new TesseractOCR($fullPath))
+            ->executable('C:\Program Files\Tesseract-OCR\tesseract.exe')
+            ->run();
                 $finalText .= "\n\nImage Text (OCR): " . $ocrText;
             }
 
-            // ❗ If nothing provided
             if (empty(trim($finalText))) {
-                return back()->with('error', 'Please enter question or upload image');
+                return response()->json(['answer' => 'Please enter question or upload image'], 400);
             }
 
-            // AI PROMPT
-            $prompt = "Solve this problem and give ONLY final answer:\n\n" . $finalText;
+            $history = Chat::latest()->take(10)->get()->reverse();
 
-            // ✅ OPENROUTER CALL (CORRECT MODEL)
+            $messages = [];
+            $messages[] = new SystemMessage("Solve this problem and give ONLY final answer. Always remember the context of the conversation.");
+
+            foreach ($history as $chat) {
+                if ($chat->question !== 'Image Input' && $chat->question !== 'Image only') {
+                    $messages[] = new UserMessage($chat->question);
+                }
+                if ($chat->answer) {
+                    $messages[] = new AssistantMessage($chat->answer);
+                }
+            }
+
+            $messages[] = new UserMessage($finalText);
+
             $response = $this->prism->text()
                 ->using('openrouter', 'openai/gpt-4o-mini')
-                ->withPrompt($prompt)
+                ->withMessages($messages)
                 ->generate();
 
             $answerText = trim($response->text ?? 'No response');
@@ -72,17 +78,18 @@ class AIController extends Controller
             $answerText = 'AI error: ' . $e->getMessage();
         }
 
-        // SAVE CHAT
-        Chat::create([
+        $chat = Chat::create([
             'question' => $request->question ?? 'Image Input',
             'answer' => $answerText,
             'image' => $imagePath
         ]);
 
-        return back()->with('success', '✅ Solution generated!');
+        return response()->json([
+            'answer' => $answerText,
+            'chat_id' => $chat->id
+        ]);
     }
 
-    // SEARCH
     public function search(Request $request)
     {
         $query = $request->input('query');
@@ -94,21 +101,18 @@ class AIController extends Controller
         return view('ai', compact('chats'));
     }
 
-    // DELETE
     public function delete($id)
     {
         Chat::findOrFail($id)->delete();
         return back()->with('success', 'Chat deleted!');
     }
 
-    // CLEAR ALL
     public function clearAll()
     {
         Chat::truncate();
-        return back()->with('success', '🔥 All chats cleared!');
+        return back()->with('success', 'All chats cleared!');
     }
 
-    // EXPORT PDF
     public function exportPdf()
     {
         $chats = Chat::latest()->get();

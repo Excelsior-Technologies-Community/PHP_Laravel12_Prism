@@ -120,7 +120,6 @@
     <h1>✨ AI Workspace</h1>
     <div class="subtitle">Ask anything & manage your conversations</div>
 
-    {{-- ❌ ERROR --}}
     @if ($errors->any())
         <div class="success-msg" style="background:#dc2626;">
             @foreach ($errors->all() as $error)
@@ -129,14 +128,12 @@
         </div>
     @endif
 
-    {{-- ✅ SUCCESS --}}
     @if(session('success'))
         <div class="success-msg" style="background:#16a34a;">
             {{ session('success') }}
         </div>
     @endif
 
-    <!-- TOP BAR -->
     <div class="top-bar">
 
         <form method="GET" action="/chat/search">
@@ -145,7 +142,6 @@
 
         <div class="actions">
 
-            <!-- CLEAR -->
             <form method="POST" action="/chat-clear"
                   onsubmit="return confirm('Are you sure?')">
                 @csrf
@@ -158,8 +154,7 @@
         </div>
     </div>
 
-    <!-- CHAT LIST -->
-    <div class="chat-box">
+    <div class="chat-box" id="chat-box">
         @forelse($chats as $chat)
 
             <div class="chat-card">
@@ -184,26 +179,21 @@
             </div>
 
         @empty
-            <p>No conversations yet</p>
+            <p id="no-chat-msg">No conversations yet</p>
         @endforelse
     </div>
 
-    <!-- LOADING -->
-    <div id="loading" style="display:none;">⚡ AI is thinking...</div>
-
-    <!-- INPUT -->
-    <form method="POST" action="/ask-ai" enctype="multipart/form-data" class="bottom">
+    <form id="chat-form" enctype="multipart/form-data" class="bottom">
         @csrf
-        <input type="text" name="question" placeholder="💬 Ask something...">
-        <input type="file" name="image" onchange="previewImage(event)">
-        <button class="btn blue">Ask</button>
+        <input type="text" name="question" id="question" placeholder="💬 Ask something...">
+        <input type="file" name="image" id="image" onchange="previewImage(event)">
+        <button type="submit" class="btn blue">Ask</button>
     </form>
 
     <img id="preview" class="preview-img" style="display:none;">
 
 </div>
 
-<!-- DELETE MODAL -->
 <div id="deleteModal" class="modal">
     <div class="modal-box">
         <h3>Delete Chat?</h3>
@@ -219,13 +209,6 @@
 </div>
 
 <script>
-
-    // LOADING
-    document.querySelector(".bottom").addEventListener("submit", function () {
-        document.getElementById("loading").style.display = "block";
-    });
-
-    // MODAL
     function openModal(id) {
         document.getElementById('deleteModal').style.display = 'flex';
         document.getElementById('deleteForm').action = '/chat/' + id;
@@ -239,7 +222,6 @@
         document.getElementById('deleteModal').style.display = 'none';
     };
 
-    // IMAGE PREVIEW
     function previewImage(event) {
         let reader = new FileReader();
         reader.onload = function () {
@@ -247,9 +229,68 @@
             output.src = reader.result;
             output.style.display = 'block';
         };
-        reader.readAsDataURL(event.target.files[0]);
+        reader.readAsDataURL(event.target.files);
     }
 
+    document.getElementById('chat-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        
+        let form = this;
+        let formData = new FormData(form);
+        let question = document.getElementById('question').value;
+        let chatBox = document.getElementById('chat-box');
+        let noChatMsg = document.getElementById('no-chat-msg');
+        
+        if(noChatMsg) noChatMsg.style.display = 'none';
+
+        let tempId = 'ai-' + Date.now();
+        let userHtml = `<div class="chat-card">`;
+        
+        if(question) {
+            userHtml += `<b>Q:</b> ${question} <br>`;
+        } else {
+            userHtml += `<b>Q:</b> Image only <br>`;
+        }
+        
+        userHtml += `<b id="${tempId}">A: ⚡ AI is thinking...</b><br><br><button class="btn red" disabled>Delete</button></div>`;
+        
+        chatBox.innerHTML += userHtml;
+        chatBox.scrollTop = chatBox.scrollHeight;
+        
+        form.reset();
+        document.getElementById('preview').style.display = 'none';
+
+        try {
+            let response = await fetch('/ask-ai', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('input[name="_token"]').value
+                }
+            });
+
+            let data = await response.json();
+            let aiElement = document.getElementById(tempId);
+            aiElement.innerHTML = '<b>A:</b> ';
+
+            let i = 0;
+            let text = data.answer;
+            let speed = 20;
+
+            function typeWriter() {
+                if (i < text.length) {
+                    aiElement.innerHTML += text.charAt(i);
+                    i++;
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                    setTimeout(typeWriter, speed);
+                }
+            }
+            typeWriter();
+
+        } catch (error) {
+            document.getElementById(tempId).innerHTML = '<b style="color:#dc2626;">Error connecting to AI.</b>';
+        }
+    });
 </script>
 
 </body>
